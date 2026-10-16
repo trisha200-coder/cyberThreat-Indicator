@@ -12,7 +12,7 @@ reports = get_default_reports()
 analysis = analyze_reports(reports)
 # Cyber Threat Intelligence Dashboard
 
-```python
+
 import streamlit as st
 import pandas as pd
 import json
