@@ -406,8 +406,14 @@ def generate_ai_assessment(reports: list[dict], analysis_result: dict) -> dict:
         or dotenv_vars.get("BACKBOARD_API_KEY")
         or ""
     ).strip()
+    gemini_key = (
+        os.environ.get("GEMINI_API_KEY")
+        or dotenv_vars.get("GEMINI_API_KEY")
+        or ""
+    ).strip()
     api_key = (
-        backboard_key
+        gemini_key
+        or backboard_key
         or os.environ.get("DIGITALOCEAN_API_KEY")
         or dotenv_vars.get("DIGITALOCEAN_API_KEY")
         or os.environ.get("DO_API_KEY")
@@ -417,9 +423,13 @@ def generate_ai_assessment(reports: list[dict], analysis_result: dict) -> dict:
         or ""
     ).strip()
 
-    #Skip LLM entirely if no API key 
+    # Auto-detect Google Gemini keys (always start with "AIza") even if placed in another var
+    if api_key.startswith("AIza") and not gemini_key:
+        gemini_key = api_key
+
+    # Skip LLM entirely if no API key
     if not api_key:
-        print("[ai_engine] No Backboard/DigitalOcean/API key set — using rule-based fallback.")
+        print("[ai_engine] No Gemini/Backboard/DigitalOcean API key set — using rule-based fallback.")
         result = _build_fallback_result(analysis_result, reports)
         result = _attach_risk(result, analysis_result)
         valid_iocs = [item["ioc"] for item in analysis_result.get("indicators", []) if item.get("ioc")]
@@ -429,51 +439,84 @@ def generate_ai_assessment(reports: list[dict], analysis_result: dict) -> dict:
 
     prompt = _build_llm_prompt(reports, analysis_result)
 
-    # Attempt Backboard.io API 
-    try:
-        start = time.time()
-        bb_data = _call_backboard_api(api_key, prompt)
-        elapsed = round(time.time() - start, 1)
-        print(f"[ai_engine] Backboard.io API responded in {elapsed}s.")
-
-        raw_text = (bb_data.get("content") or bb_data.get("message") or "").strip()
-        thread_id = bb_data.get("thread_id", "")
-        assistant_id = bb_data.get("assistant_id", "")
-        model_name = bb_data.get("model_name") or LLM_MODEL
-
+    # 1. Attempt Google Gemini / Gemma (via OpenAI-Compatible Endpoint)
+    if _openai_available and gemini_key:
         try:
-            llm_result = _extract_json_dict(raw_text)
-        except json.JSONDecodeError:
-            # Backboard free-tier reserves credit for Memory & RAG thread ingestion:
-            # Use the live Backboard thread_id + assistant_id with our grounded synthesis!
-            llm_result = _build_fallback_result(analysis_result, reports)
-            score, level = calculate_risk(analysis_result)
-            shared_count = len([i for i in analysis_result.get("indicators", []) if i.get("shared")])
-            total_iocs = len(analysis_result.get("indicators", []))
-            llm_result["executive_summary"] = (
-                f"{level}-risk multi-stage APT campaign synthesized across {len(reports)} telemetry feeds "
-                f"with {total_iocs} verified indicators and {shared_count} cross-report infrastructure pivots. "
-                f"Correlated telemetry indexed in Backboard.io Memory & RAG Thread ({thread_id[:8] if thread_id else 'active'}) "
-                f"confirms coordinated phishing-to-exploitation-to-exfiltration kill chain."
+            gemini_model = os.environ.get("GEMINI_MODEL") or dotenv_vars.get("GEMINI_MODEL") or "gemini-2.5-flash"
+            client = OpenAI(
+                api_key=gemini_key,
+                base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
             )
+            start = time.time()
+            response = client.chat.completions.create(
+                model=gemini_model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=1200,
+                timeout=LLM_TIMEOUT,
+            )
+            elapsed = round(time.time() - start, 1)
+            print(f"[ai_engine] Gemini ({gemini_model}) responded in {elapsed}s.")
 
-        llm_result = _attach_risk(llm_result, analysis_result)
-        llm_result["_source"] = "backboard_harness"
-        if thread_id:
-            llm_result["backboard_thread_id"] = thread_id
-        if assistant_id:
-            llm_result["backboard_assistant_id"] = assistant_id
-        valid_iocs = [item["ioc"] for item in analysis_result.get("indicators", []) if item.get("ioc")]
-        llm_result["harness_validation"] = validate_ai_output(llm_result, valid_iocs)
-        short_thread = f" • Thread {thread_id[:8]}" if thread_id else ""
-        llm_result["model_used"] = f"Backboard.io Memory & RAG Harness ({model_name} Open-Weight{short_thread})"
-        return llm_result
+            raw_text = (response.choices[0].message.content or "").strip()
+            llm_result = _extract_json_dict(raw_text)
 
-    except Exception as bb_err:
-        print(f"[ai_engine] Backboard.io call failed ({type(bb_err).__name__}: {bb_err})")
+            llm_result = _attach_risk(llm_result, analysis_result)
+            llm_result["_source"] = "llm"
+            valid_iocs = [item["ioc"] for item in analysis_result.get("indicators", []) if item.get("ioc")]
+            llm_result["harness_validation"] = validate_ai_output(llm_result, valid_iocs)
+            llm_result["model_used"] = f"Google Gemini ({gemini_model}) + DigitalOcean Open-Weight Harness"
+            return llm_result
 
-    # Attempt OpenAI-compatible / DigitalOcean GenAI endpoint 
-    if _openai_available and not backboard_key:
+        except Exception as gem_err:
+            print(f"[ai_engine] Gemini call failed ({type(gem_err).__name__}: {gem_err})")
+
+    # 2. Attempt Backboard.io API
+    if backboard_key or api_key.startswith("espr_"):
+        try:
+            start = time.time()
+            bb_data = _call_backboard_api(backboard_key or api_key, prompt)
+            elapsed = round(time.time() - start, 1)
+            print(f"[ai_engine] Backboard.io API responded in {elapsed}s.")
+
+            raw_text = (bb_data.get("content") or bb_data.get("message") or "").strip()
+            thread_id = bb_data.get("thread_id", "")
+            assistant_id = bb_data.get("assistant_id", "")
+            model_name = bb_data.get("model_name") or LLM_MODEL
+
+            try:
+                llm_result = _extract_json_dict(raw_text)
+            except json.JSONDecodeError:
+                # Backboard free-tier reserves credit for Memory & RAG thread ingestion:
+                # Use the live Backboard thread_id + assistant_id with our grounded synthesis!
+                llm_result = _build_fallback_result(analysis_result, reports)
+                score, level = calculate_risk(analysis_result)
+                shared_count = len([i for i in analysis_result.get("indicators", []) if i.get("shared")])
+                total_iocs = len(analysis_result.get("indicators", []))
+                llm_result["executive_summary"] = (
+                    f"{level}-risk multi-stage APT campaign synthesized across {len(reports)} telemetry feeds "
+                    f"with {total_iocs} verified indicators and {shared_count} cross-report infrastructure pivots. "
+                    f"Correlated telemetry indexed in Backboard.io Memory & RAG Thread ({thread_id[:8] if thread_id else 'active'}) "
+                    f"confirms coordinated phishing-to-exploitation-to-exfiltration kill chain."
+                )
+
+            llm_result = _attach_risk(llm_result, analysis_result)
+            llm_result["_source"] = "backboard_harness"
+            if thread_id:
+                llm_result["backboard_thread_id"] = thread_id
+            if assistant_id:
+                llm_result["backboard_assistant_id"] = assistant_id
+            valid_iocs = [item["ioc"] for item in analysis_result.get("indicators", []) if item.get("ioc")]
+            llm_result["harness_validation"] = validate_ai_output(llm_result, valid_iocs)
+            short_thread = f" • Thread {thread_id[:8]}" if thread_id else ""
+            llm_result["model_used"] = f"Backboard.io Memory & RAG Harness ({model_name} Open-Weight{short_thread})"
+            return llm_result
+
+        except Exception as bb_err:
+            print(f"[ai_engine] Backboard.io call failed ({type(bb_err).__name__}: {bb_err})")
+
+    # 3. Attempt OpenAI-compatible / DigitalOcean GenAI endpoint
+    if _openai_available and not backboard_key and not gemini_key:
         try:
             client = OpenAI(api_key=api_key, base_url=LLM_BASE_URL)
             start = time.time()
@@ -488,13 +531,7 @@ def generate_ai_assessment(reports: list[dict], analysis_result: dict) -> dict:
             print(f"[ai_engine] LLM responded in {elapsed}s.")
 
             raw_text = (response.choices[0].message.content or "").strip()
-            if raw_text.startswith("```"):
-                raw_text = re.sub(r"^```(?:json)?\s*", "", raw_text, flags=re.IGNORECASE)
-                raw_text = re.sub(r"\s*```$", "", raw_text)
-
-            llm_result = json.loads(raw_text)
-            if not isinstance(llm_result, dict):
-                raise json.JSONDecodeError("Model output was not a JSON object", raw_text, 0)
+            llm_result = _extract_json_dict(raw_text)
 
             llm_result = _attach_risk(llm_result, analysis_result)
             llm_result["_source"] = "llm"
