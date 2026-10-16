@@ -37,11 +37,11 @@ except ImportError:
     _openai_available = False
 
 # ---------------------------------------------------------------------------
-# CONFIGURE YOUR LLM HERE  (change these two lines only)
+# DIGITALOCEAN GENAI CONFIGURATION
 # ---------------------------------------------------------------------------
-LLM_BASE_URL = None          # None = OpenAI default.  Change to Groq/Gemini/Ollama URL if needed.
-LLM_MODEL    = "gpt-4o-mini" # Cheap, fast model perfect for hackathon.  Change as needed.
-LLM_TIMEOUT  = 20            # seconds before we fall back to rule-based result
+LLM_BASE_URL = os.environ.get("DO_BASE_URL", "https://inference.do-ai.run/v1")
+LLM_MODEL = os.environ.get("DO_MODEL", "llama3.3-70b-instruct")
+LLM_TIMEOUT = 60  # seconds before we fall back to rule-based result
 # ---------------------------------------------------------------------------
 
 
@@ -341,22 +341,27 @@ def generate_ai_assessment(reports: list[dict], analysis_result: dict) -> dict:
         A dict matching the MOCK_AI_RESULT structure in contracts.py.
         Always returns something — LLM failure triggers the rule-based fallback.
     """
-    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    # DigitalOcean key is preferred; older variable names remain supported.
+    api_key = (
+        os.environ.get("DIGITALOCEAN_API_KEY")
+        or os.environ.get("DO_API_KEY")
+        or os.environ.get("OPENAI_API_KEY")
+        or ""
+    ).strip()
 
-    # ── Skip LLM entirely if no API key ───────────────────────────────────────
+    # ── Skip LLM entirely if no API key or compatible SDK ─────────────────────
     if not api_key or not _openai_available:
-        print("[ai_engine] No API key or openai package — using rule-based fallback.")
+        print("[ai_engine] No DigitalOcean/API key or openai package — using rule-based fallback.")
         result = _build_fallback_result(analysis_result, reports)
-        # Still populate risk_score & risk_level from rule-based scorer
-        return _attach_risk(result, analysis_result)
+        result = _attach_risk(result, analysis_result)
+        valid_iocs = [item["ioc"] for item in analysis_result.get("indicators", []) if item.get("ioc")]
+        result["harness_validation"] = validate_ai_output(result, valid_iocs)
+        result["model_used"] = "Rule-based fallback (LLM unavailable)"
+        return result
 
-    # ── Attempt LLM call with timeout ─────────────────────────────────────────
+    # ── Attempt DigitalOcean GenAI call with timeout ──────────────────────────
     try:
-        client_kwargs = {"api_key": api_key}
-        if LLM_BASE_URL:
-            client_kwargs["base_url"] = LLM_BASE_URL
-
-        client = OpenAI(**client_kwargs)
+        client = OpenAI(api_key=api_key, base_url=LLM_BASE_URL)
         prompt = _build_llm_prompt(reports, analysis_result)
 
         start = time.time()
@@ -370,12 +375,23 @@ def generate_ai_assessment(reports: list[dict], analysis_result: dict) -> dict:
         elapsed = round(time.time() - start, 1)
         print(f"[ai_engine] LLM responded in {elapsed}s.")
 
-        raw_text = response.choices[0].message.content.strip()
-        llm_result = json.loads(raw_text)  # may raise if model didn't return valid JSON
+        raw_text = (response.choices[0].message.content or "").strip()
 
-        # Merge LLM output with rule-based risk score (more reliable)
+        # Some models wrap valid JSON in Markdown fences; remove them safely.
+        if raw_text.startswith("```"):
+            raw_text = re.sub(r"^```(?:json)?\s*", "", raw_text, flags=re.IGNORECASE)
+            raw_text = re.sub(r"\s*```$", "", raw_text)
+
+        llm_result = json.loads(raw_text)  # may raise if model didn't return valid JSON
+        if not isinstance(llm_result, dict):
+            raise json.JSONDecodeError("Model output was not a JSON object", raw_text, 0)
+
+        # Deterministic risk score remains authoritative; validate IOC references.
         llm_result = _attach_risk(llm_result, analysis_result)
         llm_result["_source"] = "llm"
+        valid_iocs = [item["ioc"] for item in analysis_result.get("indicators", []) if item.get("ioc")]
+        llm_result["harness_validation"] = validate_ai_output(llm_result, valid_iocs)
+        llm_result["model_used"] = f"DigitalOcean GenAI ({LLM_MODEL} — open-weight model)"
         return llm_result
 
     except json.JSONDecodeError as e:
@@ -385,7 +401,11 @@ def generate_ai_assessment(reports: list[dict], analysis_result: dict) -> dict:
 
     # ── Fallback ──────────────────────────────────────────────────────────────
     result = _build_fallback_result(analysis_result, reports)
-    return _attach_risk(result, analysis_result)
+    result = _attach_risk(result, analysis_result)
+    valid_iocs = [item["ioc"] for item in analysis_result.get("indicators", []) if item.get("ioc")]
+    result["harness_validation"] = validate_ai_output(result, valid_iocs)
+    result["model_used"] = "Rule-based fallback (DigitalOcean GenAI request failed)"
+    return result
 
 
 def _attach_risk(result: dict, analysis_result: dict) -> dict:
@@ -479,7 +499,7 @@ if __name__ == "__main__":
     ]
 
     print("=" * 60)
-    print("Testing rule-based components (no API key needed)...")
+    print("Testing rule-based components (works without an API key)...")
     print("=" * 60)
 
     # Test risk scorer
