@@ -332,28 +332,83 @@ STRICT RULES:
     return prompt
 
 
-def _call_backboard_api(api_key: str, prompt: str) -> str:
+def _call_backboard_api(api_key: str, prompt: str) -> tuple[str, str]:
     """
     Calls Backboard.io API (`POST https://app.backboard.io/api/threads/messages`)
-    using the `X-API-Key` header and returns the model's text content.
+    using `requests` (avoids macOS urllib SSL errors) and returns (content, model_label).
     """
+    import requests
+
     url = f"{BACKBOARD_BASE_URL.rstrip('/')}/threads/messages"
-    payload = json.dumps({"content": prompt}).encode("utf-8")
-    req = urllib.request.Request(
-        url,
-        data=payload,
-        headers={
-            "X-API-Key": api_key,
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "User-Agent": "CyberThreatAI-Harness/1.0",
-        },
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=LLM_TIMEOUT) as resp:
-        body = resp.read().decode("utf-8")
-        data = json.loads(body)
-        return (data.get("content") or data.get("message") or "").strip()
+    headers = {
+        "X-API-Key": api_key,
+        "Content-Type": "application/json",
+    }
+    # Use openrouter open-weight model if configured, otherwise Backboard's default
+    payload = {
+        "content": prompt,
+        "json_output": True,
+    }
+    resp = requests.post(url, headers=headers, json=payload, timeout=LLM_TIMEOUT)
+    if resp.status_code >= 400:
+        # Retry without json_output flag in case the selected provider doesn't support it
+        resp = requests.post(
+            url,
+            headers=headers,
+            json={"content": prompt},
+            timeout=LLM_TIMEOUT,
+        )
+    resp.raise_for_status()
+    data = resp.json()
+    content = (data.get("content") or data.get("message") or "").strip()
+    model_name = data.get("model_name") or LLM_MODEL
+    model_provider = data.get("model_provider") or "Backboard.io"
+    return content, f"Backboard.io Harness ({model_provider}/{model_name})"
+
+
+def _extract_json_dict(raw_text: str) -> dict:
+    """
+    Robustly extracts a JSON object from LLM output even if wrapped in markdown
+    code fences or conversational preamble.
+    """
+    cleaned = raw_text.strip()
+    if "```" in cleaned:
+        fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", cleaned, flags=re.DOTALL | re.IGNORECASE)
+        if fenced:
+            cleaned = fenced.group(1).strip()
+    try:
+        obj = json.loads(cleaned)
+        if isinstance(obj, dict):
+            return obj
+    except json.JSONDecodeError:
+        pass
+
+    # Fallback: find first '{' and last '}'
+    start_idx = cleaned.find("{")
+    end_idx = cleaned.rfind("}")
+    if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+        obj = json.loads(cleaned[start_idx : end_idx + 1])
+        if isinstance(obj, dict):
+            return obj
+
+    raise json.JSONDecodeError("Could not parse JSON object from LLM output", raw_text, 0)
+
+
+def _load_dotenv_vars() -> dict[str, str]:
+    """Reads key=value pairs from .env in current or parent directory on every call."""
+    env_vars: dict[str, str] = {}
+    for candidate in (".env", "cyber-threat-ai/.env", "../.env"):
+        if os.path.isfile(candidate):
+            try:
+                with open(candidate, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith("#") and "=" in line:
+                            k, v = line.split("=", 1)
+                            env_vars[k.strip()] = v.strip().strip("'\"")
+            except Exception:
+                pass
+    return env_vars
 
 
 def generate_ai_assessment(reports: list[dict], analysis_result: dict) -> dict:
@@ -368,12 +423,20 @@ def generate_ai_assessment(reports: list[dict], analysis_result: dict) -> dict:
         A dict matching the MOCK_AI_RESULT structure in contracts.py.
         Always returns something — LLM failure triggers the rule-based fallback.
     """
-    backboard_key = os.environ.get("BACKBOARD_API_KEY", "").strip()
+    dotenv_vars = _load_dotenv_vars()
+    backboard_key = (
+        os.environ.get("BACKBOARD_API_KEY")
+        or dotenv_vars.get("BACKBOARD_API_KEY")
+        or ""
+    ).strip()
     api_key = (
         backboard_key
         or os.environ.get("DIGITALOCEAN_API_KEY")
+        or dotenv_vars.get("DIGITALOCEAN_API_KEY")
         or os.environ.get("DO_API_KEY")
+        or dotenv_vars.get("DO_API_KEY")
         or os.environ.get("OPENAI_API_KEY")
+        or dotenv_vars.get("OPENAI_API_KEY")
         or ""
     ).strip()
 
@@ -389,35 +452,24 @@ def generate_ai_assessment(reports: list[dict], analysis_result: dict) -> dict:
 
     prompt = _build_llm_prompt(reports, analysis_result)
 
-    # ── 1. Attempt Backboard.io API (Preferred when BACKBOARD_API_KEY is set, or as primary) ──
+    # ── 1. Attempt Backboard.io API ───────────────────────────────────────────
     try:
         start = time.time()
-        raw_text = _call_backboard_api(api_key, prompt)
+        raw_text, model_label = _call_backboard_api(api_key, prompt)
         elapsed = round(time.time() - start, 1)
         print(f"[ai_engine] Backboard.io LLM responded in {elapsed}s.")
 
-        # Strip Markdown code fences if the model wrapped JSON in ```json ... ```
-        if "```" in raw_text:
-            fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw_text, flags=re.DOTALL | re.IGNORECASE)
-            if fenced:
-                raw_text = fenced.group(1).strip()
-            else:
-                raw_text = re.sub(r"^```(?:json)?\s*", "", raw_text, flags=re.IGNORECASE)
-                raw_text = re.sub(r"\s*```$", "", raw_text).strip()
-
-        llm_result = json.loads(raw_text)
-        if not isinstance(llm_result, dict):
-            raise json.JSONDecodeError("Model output was not a JSON object", raw_text, 0)
+        llm_result = _extract_json_dict(raw_text)
 
         llm_result = _attach_risk(llm_result, analysis_result)
         llm_result["_source"] = "llm"
         valid_iocs = [item["ioc"] for item in analysis_result.get("indicators", []) if item.get("ioc")]
         llm_result["harness_validation"] = validate_ai_output(llm_result, valid_iocs)
-        llm_result["model_used"] = f"Backboard.io Model Harness ({LLM_MODEL} — Open-Weight Verified)"
+        llm_result["model_used"] = model_label
         return llm_result
 
     except Exception as bb_err:
-        print(f"[ai_engine] Backboard.io call info ({type(bb_err).__name__}: {bb_err})")
+        print(f"[ai_engine] Backboard.io call failed ({type(bb_err).__name__}: {bb_err})")
 
     # ── 2. Attempt OpenAI-compatible / DigitalOcean GenAI endpoint ────────────
     if _openai_available and not backboard_key:
