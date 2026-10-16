@@ -394,7 +394,7 @@ with overview:
             df = pd.DataFrame(indicators)
             if "reports" in df.columns:
                 df["reports"] = df["reports"].apply(lambda x: ", ".join(x) if isinstance(x, list) else str(x))
-            st.dataframe(df, use_container_width=True, hide_index=True)
+            st.dataframe(df, width="stretch", hide_index=True)
 
     with st.expander("🔍 Full Analysis Output (JSON)"):
         st.json(analysis_result)
