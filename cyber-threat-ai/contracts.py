@@ -1,6 +1,6 @@
-# Shared data contract for the cyber threat intelligence project
 
-# contracts.py — DO NOT CHANGE KEYS WITHOUT TELLING THE TEAM
+
+# contracts.py 
 MOCK_ANALYSIS_RESULT = {
     "metrics": {
         "total_reports": 3,
