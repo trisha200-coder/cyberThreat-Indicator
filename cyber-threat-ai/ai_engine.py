@@ -13,8 +13,8 @@ import urllib.request
 import urllib.error
 
 # Uncomment these two lines if you are using a .env file for the API key:
-from dotenv import load_dotenv
-load_dotenv()
+#from dotenv import load_dotenv
+#load_dotenv()
 
 # ── OpenAI-compatible client ──────────────────────────────────────────────────
 try:
