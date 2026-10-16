@@ -8,7 +8,7 @@ An AI-powered Cyber Threat Intelligence (CTI) Fusion Engine and **Open-Weight Mo
 
 ---
 
-## 🧠 Open-Weight AI & Model Harness Architecture
+## Open-Weight AI & Model Harness Architecture
 
 This project implements an **original domain-specific Model Harness** built around open-weight Large Language Models (such as **Meta Llama 3.3 70B Instruct** / **Mistral** hosted on the **DigitalOcean GenAI Platform** or local **Ollama**):
 
@@ -25,7 +25,7 @@ This project implements an **original domain-specific Model Harness** built arou
 
 ---
 
-## 🚀 Quick Start
+##  Quick Start
 
 ### 1. Install Dependencies
 ```bash
