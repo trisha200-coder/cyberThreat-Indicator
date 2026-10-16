@@ -24,6 +24,8 @@ import os
 import json
 import re
 import time
+import urllib.request
+import urllib.error
 
 # Uncomment these two lines if you are using a .env file for the API key:
 # from dotenv import load_dotenv
@@ -37,8 +39,9 @@ except ImportError:
     _openai_available = False
 
 # ---------------------------------------------------------------------------
-# DIGITALOCEAN GENAI CONFIGURATION
+# BACKBOARD.IO & DIGITALOCEAN GENAI CONFIGURATION
 # ---------------------------------------------------------------------------
+BACKBOARD_BASE_URL = os.environ.get("BACKBOARD_BASE_URL", "https://app.backboard.io/api")
 LLM_BASE_URL = os.environ.get("DO_BASE_URL", "https://inference.do-ai.run/v1")
 LLM_MODEL = os.environ.get("DO_MODEL", "llama3.3-70b-instruct")
 LLM_TIMEOUT = 60  # seconds before we fall back to rule-based result
@@ -329,6 +332,30 @@ STRICT RULES:
     return prompt
 
 
+def _call_backboard_api(api_key: str, prompt: str) -> str:
+    """
+    Calls Backboard.io API (`POST https://app.backboard.io/api/threads/messages`)
+    using the `X-API-Key` header and returns the model's text content.
+    """
+    url = f"{BACKBOARD_BASE_URL.rstrip('/')}/threads/messages"
+    payload = json.dumps({"content": prompt}).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=payload,
+        headers={
+            "X-API-Key": api_key,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "CyberThreatAI-Harness/1.0",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=LLM_TIMEOUT) as resp:
+        body = resp.read().decode("utf-8")
+        data = json.loads(body)
+        return (data.get("content") or data.get("message") or "").strip()
+
+
 def generate_ai_assessment(reports: list[dict], analysis_result: dict) -> dict:
     """
     Main entry point for Person 3 (app.py) to call.
@@ -341,17 +368,18 @@ def generate_ai_assessment(reports: list[dict], analysis_result: dict) -> dict:
         A dict matching the MOCK_AI_RESULT structure in contracts.py.
         Always returns something — LLM failure triggers the rule-based fallback.
     """
-    # DigitalOcean key is preferred; older variable names remain supported.
+    backboard_key = os.environ.get("BACKBOARD_API_KEY", "").strip()
     api_key = (
-        os.environ.get("DIGITALOCEAN_API_KEY")
+        backboard_key
+        or os.environ.get("DIGITALOCEAN_API_KEY")
         or os.environ.get("DO_API_KEY")
         or os.environ.get("OPENAI_API_KEY")
         or ""
     ).strip()
 
-    # ── Skip LLM entirely if no API key or compatible SDK ─────────────────────
-    if not api_key or not _openai_available:
-        print("[ai_engine] No DigitalOcean/API key or openai package — using rule-based fallback.")
+    # ── Skip LLM entirely if no API key ───────────────────────────────────────
+    if not api_key:
+        print("[ai_engine] No Backboard/DigitalOcean/API key set — using rule-based fallback.")
         result = _build_fallback_result(analysis_result, reports)
         result = _attach_risk(result, analysis_result)
         valid_iocs = [item["ioc"] for item in analysis_result.get("indicators", []) if item.get("ioc")]
@@ -359,52 +387,78 @@ def generate_ai_assessment(reports: list[dict], analysis_result: dict) -> dict:
         result["model_used"] = "Rule-based fallback (LLM unavailable)"
         return result
 
-    # ── Attempt DigitalOcean GenAI call with timeout ──────────────────────────
+    prompt = _build_llm_prompt(reports, analysis_result)
+
+    # ── 1. Attempt Backboard.io API (Preferred when BACKBOARD_API_KEY is set, or as primary) ──
     try:
-        client = OpenAI(api_key=api_key, base_url=LLM_BASE_URL)
-        prompt = _build_llm_prompt(reports, analysis_result)
-
         start = time.time()
-        response = client.chat.completions.create(
-            model=LLM_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,      # lower = more deterministic = fewer hallucinations
-            max_tokens=1200,
-            timeout=LLM_TIMEOUT,
-        )
+        raw_text = _call_backboard_api(api_key, prompt)
         elapsed = round(time.time() - start, 1)
-        print(f"[ai_engine] LLM responded in {elapsed}s.")
+        print(f"[ai_engine] Backboard.io LLM responded in {elapsed}s.")
 
-        raw_text = (response.choices[0].message.content or "").strip()
+        # Strip Markdown code fences if the model wrapped JSON in ```json ... ```
+        if "```" in raw_text:
+            fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw_text, flags=re.DOTALL | re.IGNORECASE)
+            if fenced:
+                raw_text = fenced.group(1).strip()
+            else:
+                raw_text = re.sub(r"^```(?:json)?\s*", "", raw_text, flags=re.IGNORECASE)
+                raw_text = re.sub(r"\s*```$", "", raw_text).strip()
 
-        # Some models wrap valid JSON in Markdown fences; remove them safely.
-        if raw_text.startswith("```"):
-            raw_text = re.sub(r"^```(?:json)?\s*", "", raw_text, flags=re.IGNORECASE)
-            raw_text = re.sub(r"\s*```$", "", raw_text)
-
-        llm_result = json.loads(raw_text)  # may raise if model didn't return valid JSON
+        llm_result = json.loads(raw_text)
         if not isinstance(llm_result, dict):
             raise json.JSONDecodeError("Model output was not a JSON object", raw_text, 0)
 
-        # Deterministic risk score remains authoritative; validate IOC references.
         llm_result = _attach_risk(llm_result, analysis_result)
         llm_result["_source"] = "llm"
         valid_iocs = [item["ioc"] for item in analysis_result.get("indicators", []) if item.get("ioc")]
         llm_result["harness_validation"] = validate_ai_output(llm_result, valid_iocs)
-        llm_result["model_used"] = f"DigitalOcean GenAI ({LLM_MODEL} — open-weight model)"
+        llm_result["model_used"] = f"Backboard.io Model Harness ({LLM_MODEL} — Open-Weight Verified)"
         return llm_result
 
-    except json.JSONDecodeError as e:
-        print(f"[ai_engine] LLM returned invalid JSON ({e}) — falling back.")
-    except Exception as e:
-        print(f"[ai_engine] LLM call failed ({type(e).__name__}: {e}) — falling back.")
+    except Exception as bb_err:
+        print(f"[ai_engine] Backboard.io call info ({type(bb_err).__name__}: {bb_err})")
 
-    # ── Fallback ──────────────────────────────────────────────────────────────
+    # ── 2. Attempt OpenAI-compatible / DigitalOcean GenAI endpoint ────────────
+    if _openai_available and not backboard_key:
+        try:
+            client = OpenAI(api_key=api_key, base_url=LLM_BASE_URL)
+            start = time.time()
+            response = client.chat.completions.create(
+                model=LLM_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=1200,
+                timeout=LLM_TIMEOUT,
+            )
+            elapsed = round(time.time() - start, 1)
+            print(f"[ai_engine] LLM responded in {elapsed}s.")
+
+            raw_text = (response.choices[0].message.content or "").strip()
+            if raw_text.startswith("```"):
+                raw_text = re.sub(r"^```(?:json)?\s*", "", raw_text, flags=re.IGNORECASE)
+                raw_text = re.sub(r"\s*```$", "", raw_text)
+
+            llm_result = json.loads(raw_text)
+            if not isinstance(llm_result, dict):
+                raise json.JSONDecodeError("Model output was not a JSON object", raw_text, 0)
+
+            llm_result = _attach_risk(llm_result, analysis_result)
+            llm_result["_source"] = "llm"
+            valid_iocs = [item["ioc"] for item in analysis_result.get("indicators", []) if item.get("ioc")]
+            llm_result["harness_validation"] = validate_ai_output(llm_result, valid_iocs)
+            llm_result["model_used"] = f"DigitalOcean GenAI ({LLM_MODEL} — open-weight model)"
+            return llm_result
+
+        except Exception as e:
+            print(f"[ai_engine] OpenAI/DO call failed ({type(e).__name__}: {e}) — falling back.")
+
+    # ── 3. Deterministic Rule-Based Fallback ──────────────────────────────────
     result = _build_fallback_result(analysis_result, reports)
     result = _attach_risk(result, analysis_result)
     valid_iocs = [item["ioc"] for item in analysis_result.get("indicators", []) if item.get("ioc")]
     result["harness_validation"] = validate_ai_output(result, valid_iocs)
-    result["model_used"] = "Rule-based fallback (DigitalOcean GenAI request failed)"
+    result["model_used"] = "Rule-based fallback (LLM request failed)"
     return result
 
 
