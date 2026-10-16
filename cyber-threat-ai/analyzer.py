@@ -1,12 +1,3 @@
-"""
-analyzer.py
-Owned by: Person 1 (Data & Correlation Module)
-Purpose:
-  1. Refangs obfuscated indicators (e.g., 185.220.101[.]45 -> 185.220.101.45, hxxps -> https)
-  2. Extracts IPv4, Domain, URL, MD5, SHA256, and CVE indicators using regex
-  3. Deduplicates indicators per report and captures sentence-level evidence
-  4. Correlates shared indicators across reports and builds graph edges for NetworkX/Plotly
-"""
 
 import re
 from urllib.parse import urlparse
