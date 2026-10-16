@@ -1,4 +1,4 @@
-# 🛡️ Securify // AI Threat Intelligence Fusion Engine
+# Threat Lens AI :)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![AI: Open-Weight Llama 3.3](https://img.shields.io/badge/Open--Weight%20AI-Llama%203.3%2070B-orange)](https://www.digitalocean.com/products/genai-platform)
@@ -8,7 +8,7 @@ An AI-powered Cyber Threat Intelligence (CTI) Fusion Engine and **Open-Weight Mo
 
 ---
 
-## 🧠 Open-Weight AI & Model Harness Architecture
+#Open-Weight AI & Model Harness Architecture
 
 This project implements an **original domain-specific Model Harness** built around open-weight Large Language Models (such as **Meta Llama 3.3 70B Instruct** / **Mistral** hosted on the **DigitalOcean GenAI Platform** or local **Ollama**):
 
@@ -25,7 +25,7 @@ This project implements an **original domain-specific Model Harness** built arou
 
 ---
 
-## 🚀 Quick Start
+#Quick Start
 
 ### 1. Install Dependencies
 ```bash
@@ -56,7 +56,7 @@ python -m streamlit run app.py
 
 ---
 
-## 📜 Open-Source License & Attribution
+#Open-Source License & Attribution
 
 * **Source Code License:** Released under the open-source **[MIT License](LICENSE)**.
 * **Open-Weight Model & Inference:** Powered by open-weight models (`llama3.3-70b-instruct`) via **DigitalOcean GenAI Platform** / **Ollama**.
