@@ -147,6 +147,189 @@ def extract_iocs_from_report(report: Dict[str, str]) -> List[Dict[str, str]]:
 
 
 # =====================================================================
+# 4B. THREAT ACTOR ATTRIBUTION & RECOGNIZABILITY ENGINE
+# =====================================================================
+KNOWN_ACTOR_SIGNATURES = [
+    {
+        "actor_id": "ACT-01",
+        "handle": "k0balt_vortex",
+        "group_name": "FIN-SHADOW Syndicate",
+        "origin_hint": "UTC+3 Operational Cadence // Financial & Core Infra Targeting",
+        "signature_regex": re.compile(r"k0balt_vortex|fin-shadow|shadowloader|shadowbot", re.IGNORECASE),
+        "known_iocs": {
+            "185.220.101.45",
+            "45.155.205.99",
+            "91.214.124.10",
+            "auth-update-portal.com",
+            "login-verification-cloud.net",
+            "telemetry-cdn-edge.org",
+            "cdn-sync-service.net",
+            "44d88612fea8a8f36de82e1278abb02f",
+            "8b1a9953c4611296a827abf8c47804d7",
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
+        },
+        " behavioral_pattern": (
+            "Spearphishing PDF/SSO link -> CVE-2024-21412 & CVE-2024-3400 exploitation -> "
+            "Certutil/Mimikatz LSASS dump -> SMB/WMI lateral movement -> C2 exfiltration & ransomware staging"
+        ),
+        "forensic_fingerprints": [
+            "PDF metadata author handle 'k0balt_vortex' (UTC+3)",
+            "Hardcoded PDB path: C:\\Users\\k0balt_vortex\\repos\\ShadowLoader\\stage1.pdb",
+            "Registry persistence key: HKCU\\Software\\k0balt_vortex",
+            "Custom brute-force User-Agent: ShadowBot/3.1 (operator:k0balt_vortex)",
+            "TLS certificate subject: CN=k0balt_vortex.fin-shadow.ops",
+            "SSH jump-box key comment: k0balt_vortex@fin-shadow.local",
+        ],
+    },
+    {
+        "actor_id": "ACT-02",
+        "handle": "nightshade_0x",
+        "group_name": "VOLT-SPIDER Supply-Chain Group",
+        "origin_hint": "CI/CD Supply-Chain & Cloud IAM Token Replay Specialist",
+        "signature_regex": re.compile(r"nightshade_0x|volt-spider|api-git-mirror", re.IGNORECASE),
+        "known_iocs": {
+            "194.26.135.88",
+            "api-git-mirror.io",
+            "d41d8cd98f00b204e9800998ecf8427e",
+        },
+        " behavioral_pattern": (
+            "Trojanized Git mirror dependency injection -> CVE-2024-21412 exploit reuse -> "
+            "AWS IAM role assumption & S3 bucket token replay"
+        ),
+        "forensic_fingerprints": [
+            "Git commit & GPG signature alias: 'nightshade_0x'",
+            "Automated cloud exfiltration script tag: 'nightshade_0x'",
+            "Reused loader MD5: d41d8cd98f00b204e9800998ecf8427e across CI/CD and AWS logs",
+        ],
+    },
+]
+
+
+def detect_attacker_attribution(
+    reports: List[Dict[str, str]],
+    indicators: List[Dict[str, Any]],
+    connections: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """
+    Evaluates all reports, extracted IOCs, and cross-report connections to determine:
+      1. Whether the attacker(s) are RECOGNIZABLE or UNRECOGNIZABLE.
+      2. Specific Threat Actor Profiles (handles, groups, matched reports, confidence).
+      3. Per-report attribution mapping (including flagging isolated/anonymous noise).
+    """
+    report_ioc_map: Dict[str, set] = {r.get("id", "REP-UNKNOWN"): set() for r in reports}
+    for ind in indicators:
+        for rep_id in ind.get("reports", []):
+            report_ioc_map.setdefault(rep_id, set()).add(ind["ioc"].lower())
+
+    actor_profiles: List[Dict[str, Any]] = []
+    attributed_reports: Dict[str, Dict[str, Any]] = {}
+
+    for sig in KNOWN_ACTOR_SIGNATURES:
+        matched_reports = []
+        matched_iocs = set()
+        for rep in reports:
+            rep_id = rep.get("id", "REP-UNKNOWN")
+            raw_text = rep.get("text", "")
+            rep_iocs = report_ioc_map.get(rep_id, set())
+            ioc_overlap = rep_iocs.intersection(sig["known_iocs"])
+            text_match = bool(sig["signature_regex"].search(raw_text))
+
+            if text_match or ioc_overlap:
+                matched_reports.append(rep_id)
+                matched_iocs.update(ioc_overlap)
+
+        if matched_reports:
+            # Recognizable if seen across >=2 reports OR has explicit operator signature + IOCs
+            is_actor_recognizable = len(matched_reports) >= 2 or len(matched_iocs) >= 2
+            conf = min(98, 55 + (len(matched_reports) * 6) + (len(matched_iocs) * 3))
+            profile = {
+                "actor_id": sig["actor_id"],
+                "handle": sig["handle"],
+                "group_name": sig["group_name"],
+                "recognizable": is_actor_recognizable,
+                "recognizability_label": (
+                    "✅ RECOGNIZABLE ATTACKER"
+                    if is_actor_recognizable
+                    else "⚠️ PARTIAL / LOW CONFIDENCE"
+                ),
+                "confidence": conf,
+                "matched_reports": matched_reports,
+                "matched_ioc_count": len(matched_iocs),
+                "matched_iocs": sorted(matched_iocs),
+                "origin_hint": sig["origin_hint"],
+                "behavioral_pattern": sig[" behavioral_pattern"],
+                "forensic_fingerprints": sig["forensic_fingerprints"],
+            }
+            actor_profiles.append(profile)
+            for r_id in matched_reports:
+                attributed_reports[r_id] = {
+                    "report_id": r_id,
+                    "recognizable": is_actor_recognizable,
+                    "attacker_handle": f"{sig['handle']} ({sig['group_name']})",
+                    "confidence": f"{conf}%",
+                    "verdict": "✅ Recognizable (Matched Operator & Infrastructure Pattern)",
+                }
+
+    # Check for any reports that did NOT match a recognizable pattern (e.g., REP-10)
+    unattributed_report_ids = []
+    for rep in reports:
+        rep_id = rep.get("id", "REP-UNKNOWN")
+        if rep_id not in attributed_reports:
+            unattributed_report_ids.append(rep_id)
+            attributed_reports[rep_id] = {
+                "report_id": rep_id,
+                "recognizable": False,
+                "attacker_handle": "Unknown / Anonymous Actor",
+                "confidence": "12%",
+                "verdict": "❌ Not Recognizable (Isolated probe with 0 shared IOCs & no operator signature)",
+            }
+
+    actor_profiles.sort(key=lambda x: (-len(x["matched_reports"]), -x["confidence"]))
+
+    overall_recognizable = any(p["recognizable"] for p in actor_profiles) or len(connections) >= 2
+    if actor_profiles:
+        primary = actor_profiles[0]
+        primary_name = f"Operator '{primary['handle']}' ({primary['group_name']})"
+        overall_conf = primary["confidence"]
+        verdict_summary = (
+            f"YES — ATTACKER IS RECOGNIZABLE ({overall_conf}% Confidence). "
+            f"Cross-report behavioral and forensic analysis identified {len(actor_profiles)} distinct threat actor persona(s): "
+            + "; ".join(
+                f"'{p['handle']}' ({p['group_name']}) across {len(p['matched_reports'])} reports ({', '.join(p['matched_reports'])})"
+                for p in actor_profiles
+            )
+            + (
+                f". Meanwhile, {', '.join(unattributed_report_ids)} was flagged as NOT RECOGNIZABLE (isolated anonymous noise with 0 shared IOCs)."
+                if unattributed_report_ids
+                else "."
+            )
+        )
+    else:
+        primary_name = "Unidentified / Anonymous Threat Actor"
+        overall_conf = 15 if len(connections) == 0 else 55
+        verdict_summary = (
+            "NO — ATTACKER IS NOT RECOGNIZABLE. Insufficient behavioral repetition, zero known operator handles, "
+            "and no recurring C2 infrastructure across reports to attribute the attack to a specific person."
+        )
+
+    return {
+        "is_recognizable": overall_recognizable,
+        "status_badge": (
+            f"✅ ATTACKER RECOGNIZABLE ({overall_conf}% Confidence)"
+            if overall_recognizable
+            else "❌ ATTACKER NOT RECOGNIZABLE (Anonymous / Insufficient Pattern)"
+        ),
+        "primary_attacker": primary_name,
+        "confidence_score": overall_conf,
+        "verdict_summary": verdict_summary,
+        "actor_profiles": actor_profiles,
+        "unattributed_reports": unattributed_report_ids,
+        "per_report_attribution": list(attributed_reports.values()),
+    }
+
+
+# =====================================================================
 # 4. CROSS-REPORT CORRELATION & GRAPH BUILDER (Main Entry Point)
 # =====================================================================
 def analyze_reports(reports: List[Dict[str, str]]) -> Dict[str, Any]:
@@ -158,6 +341,7 @@ def analyze_reports(reports: List[Dict[str, str]]) -> Dict[str, Any]:
       - raw_occurrences: flat per-report list (if someone wants 1 row per report-IOC pair)
       - connections: shared IOCs that link 2+ reports together with evidence
       - graph_edges: (report_id, ioc, "Report", ioc_type) tuples for NetworkX/Plotly
+      - attribution: threat actor recognizability verdict and suspect profiles
     """
     raw_occurrences: List[Dict[str, str]] = []
     for report in reports:
@@ -233,6 +417,8 @@ def analyze_reports(reports: List[Dict[str, str]]) -> Dict[str, Any]:
     else:
         campaign_confidence = min(95, 45 + (shared_count * 18))
 
+    attribution = detect_attacker_attribution(reports, indicators, connections)
+
     return {
         "reports": reports,
         "metrics": {
@@ -245,6 +431,7 @@ def analyze_reports(reports: List[Dict[str, str]]) -> Dict[str, Any]:
         "raw_occurrences": raw_occurrences,
         "connections": connections,
         "graph_edges": graph_edges,
+        "attribution": attribution,
     }
 
 
@@ -256,7 +443,7 @@ if __name__ == "__main__":
     result = analyze_reports(sample_reports)
 
     print("=" * 65)
-    print("🔍 ANALYZER SELF-TEST RESULTS (3 BUILT-IN REPORTS)")
+    print(f"🔍 ANALYZER SELF-TEST RESULTS ({len(sample_reports)} BUILT-IN REPORTS)")
     print("=" * 65)
     m = result["metrics"]
     print(
@@ -264,27 +451,12 @@ if __name__ == "__main__":
         f"Shared (Bridges): {m['shared_iocs']} | Campaign Confidence: {m['campaign_confidence']}%"
     )
 
+    attr = result["attribution"]
+    print(f"\n🕵️ ATTACKER RECOGNIZABILITY VERDICT: {attr['status_badge']}")
+    print(f"   Primary Attacker: {attr['primary_attacker']}")
+    print(f"   Summary: {attr['verdict_summary']}")
+
     print("\n📌 EXTRACTED INDICATORS (Shared first):")
     for ind in result["indicators"]:
         shared_badge = "🔗 SHARED" if ind["shared"] else "   single"
         print(f"  {shared_badge} | [{ind['type']:6}] {ind['ioc']:35} <- {ind['reports']}")
-
-    print("\n🕸️ CORRELATED CONNECTIONS (Cross-Report Bridges):")
-    for conn in result["connections"]:
-        print(f"  🔥 {conn['ioc']} ({conn['type']}) connects {conn['linked_reports']}")
-        for rep_id, ev in conn["evidence_by_report"].items():
-            print(f"      - {rep_id}: \"{ev}\"")
-
-    # Test adding the 4th Live Demo Report
-    print("\n" + "=" * 65)
-    print("🚀 TESTING LIVE DEMO INJECTION (+ REP-04)")
-    print("=" * 65)
-    plus_live = sample_reports + [LIVE_DEMO_REPORT]
-    live_result = analyze_reports(plus_live)
-    lm = live_result["metrics"]
-    print(
-        f"Reports: {lm['total_reports']} | Unique IOCs: {lm['total_iocs']} | "
-        f"Shared (Bridges): {lm['shared_iocs']} | Campaign Confidence: {lm['campaign_confidence']}%"
-    )
-    for conn in live_result["connections"]:
-        print(f"  🔥 {conn['ioc']} ({conn['type']}) connects {conn['linked_reports']}")

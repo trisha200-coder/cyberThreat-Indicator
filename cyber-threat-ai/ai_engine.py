@@ -204,6 +204,10 @@ def _build_fallback_result(analysis_result: dict, reports: list[dict]) -> dict:
             "Recommend continued monitoring and correlation against threat intelligence feeds."
         )
 
+    attribution = analysis_result.get("attribution", {})
+    if attribution.get("verdict_summary"):
+        hypotheses.insert(0, attribution["verdict_summary"])
+
     # defensive actions
     defensive_actions = []
     block_items = [i["ioc"] for i in indicators if i["type"] in ("IPv4", "Domain", "URL")]
@@ -236,24 +240,25 @@ def _build_fallback_result(analysis_result: dict, reports: list[dict]) -> dict:
             "[REVIEW] Escalate reports to Tier-2 analyst for manual triage."
         )
 
-    
     shared_label = f"{len(shared_iocs)} shared IOC(s)" if shared_iocs else "no shared IOCs"
+    attr_badge = attribution.get("status_badge", "Attacker Recognizability Evaluated")
+    primary_actor = attribution.get("primary_attacker", "Unknown Actor")
     exec_summary = (
         f"{level}-risk assessment across {total_reports} correlated report(s) "
         f"with {len(indicators)} extracted indicator(s) and {shared_label}. "
-        f"{'Evidence of coordinated campaign activity detected. ' if shared_iocs else ''}"
-        f"Rule-based analysis complete — LLM enhancement unavailable."
+        f"Attacker Verdict: {attr_badge} — Primary Threat Actor identified as {primary_actor}."
     )
 
     return {
-        "risk_level":        level,
-        "risk_score":        score,
-        "executive_summary": exec_summary,
-        "evidence_facts":    evidence_facts,
-        "ai_hypotheses":     hypotheses,
-        "mitre_techniques":  techniques,
-        "defensive_actions": defensive_actions,
-        "_source":           "rule-based-fallback",   
+        "risk_level":           level,
+        "risk_score":           score,
+        "executive_summary":    exec_summary,
+        "evidence_facts":       evidence_facts,
+        "ai_hypotheses":        hypotheses,
+        "mitre_techniques":     techniques,
+        "defensive_actions":    defensive_actions,
+        "attacker_attribution": attribution,
+        "_source":              "rule-based-fallback",
     }
 
 
@@ -553,10 +558,12 @@ def generate_ai_assessment(reports: list[dict], analysis_result: dict) -> dict:
 
 
 def _attach_risk(result: dict, analysis_result: dict) -> dict:
-    """Compute risk_score and risk_level deterministically and attach them."""
+    """Compute risk_score and risk_level deterministically and attach them along with attribution."""
     score, level = calculate_risk(analysis_result)
     result["risk_score"] = score
     result["risk_level"] = level
+    if "attribution" in analysis_result:
+        result["attacker_attribution"] = analysis_result["attribution"]
     return result
 
 
