@@ -1,4 +1,4 @@
-# 🛡️ Securify // AI Threat Intelligence Fusion Engine
+#  Securify // AI Threat Intelligence Fusion Engine
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![AI: Open-Weight Llama 3.3](https://img.shields.io/badge/Open--Weight%20AI-Llama%203.3%2070B-orange)](https://www.digitalocean.com/products/genai-platform)
