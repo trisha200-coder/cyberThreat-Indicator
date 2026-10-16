@@ -3,7 +3,7 @@
 
 # The code works with:
 #   OpenAI,Google Gemini OpenAI-compat endpoint, Groq  ,Local Ollama 
-# =============================================================================
+
 
 import os
 import json
@@ -12,35 +12,32 @@ import time
 import urllib.request
 import urllib.error
 
-# Uncomment these two lines if you are using a .env file for the API key:
-#from dotenv import load_dotenv
-#load_dotenv()
 
-# ── OpenAI-compatible client ──────────────────────────────────────────────────
+
+
 try:
     from openai import OpenAI
     _openai_available = True
 except ImportError:
     _openai_available = False
 
-# ---------------------------------------------------------------------------
+
 # BACKBOARD.IO & DIGITALOCEAN GENAI CONFIGURATION
-# ---------------------------------------------------------------------------
+
 BACKBOARD_BASE_URL = os.environ.get("BACKBOARD_BASE_URL", "https://app.backboard.io/api")
 LLM_BASE_URL = os.environ.get("DO_BASE_URL", "https://inference.do-ai.run/v1")
 LLM_MODEL = os.environ.get("DO_MODEL", "llama3.3-70b-instruct")
-LLM_TIMEOUT = 60  # seconds before we fall back to rule-based result
-# ---------------------------------------------------------------------------
+LLM_TIMEOUT = 60  
 
 
-# =============================================================================
-# SECTION 1 — MITRE ATT&CK KEYWORD → TECHNIQUE MAPPER
-# =============================================================================
-# This dictionary maps keywords (found in report text) to MITRE techniques.
-# Add more if you have time — judges love seeing MITRE coverage.
+
+
+# MITRE ATT&CK KEYWORD : 
+
+# This dictionary maps keywords from the given url to MITRE techniques.
 
 MITRE_KEYWORD_MAP = [
-    # keyword patterns            technique_id  name                              tactic
+   
     (r"phish|spearphish|credential|harvest",  "T1566", "Phishing",                             "Initial Access"),
     (r"cve-\d{4}-\d+|exploit|vulnerab",       "T1190", "Exploit Public-Facing Application",    "Initial Access"),
     (r"c2|command.and.control|beacon|callback","T1071", "Application Layer Protocol",           "Command and Control"),
@@ -75,16 +72,16 @@ def map_mitre_techniques(all_text: str) -> list[dict]:
             techniques.append({"id": tid, "name": name, "tactic": tactic})
             seen_ids.add(tid)
 
-    # Always guarantee at least one technique so the UI never shows an empty list
+    
     if not techniques:
         techniques.append({"id": "T1566", "name": "Phishing", "tactic": "Initial Access"})
 
     return techniques
 
 
-# =============================================================================
-# SECTION 2 — DETERMINISTIC RISK SCORER
-# =============================================================================
+
+# DETERMINISTIC RISK SCORER
+
 
 def calculate_risk(analysis_result: dict) -> tuple[int, str]:
     """
@@ -102,33 +99,33 @@ def calculate_risk(analysis_result: dict) -> tuple[int, str]:
 
     Returns: (score: int, level: str)
     """
-    score = 20  # baseline — something is always worth looking at
+    score = 20  #baseline
 
     indicators  = analysis_result.get("indicators", [])
     shared_iocs = [i for i in indicators if i.get("shared")]
     all_types   = {i["type"] for i in indicators}
 
-    # Shared IOCs are the strongest signal of coordinated attack
+    # checking for shared iocs
     score += min(len(shared_iocs) * 15, 45)
 
-    # CVE means a known vulnerability is being weaponised
+    # CVE 
     if any(i["type"] == "CVE" for i in indicators):
         score += 20
 
-    # Domain/URL + Hash together = multi-stage attack (delivery → execution)
+    # checking for multi staged attack
     has_domain_or_url = bool({"Domain", "URL"} & all_types)
     has_hash          = bool({"MD5", "SHA256", "SHA1"} & all_types)
     if has_domain_or_url and has_hash:
         score += 10
 
-    # Many correlated reports = wider campaign
+    # checking correlated words
     total_reports = analysis_result.get("metrics", {}).get("total_reports", 1)
     if total_reports > 2:
         score += 10
 
-    score = min(score, 100)  # cap at 100
+    score = min(score, 100)  
 
-    # Map numeric score → human-readable level
+    # conditions for scoring
     if score >= 90:
         level = "CRITICAL"
     elif score >= 70:
@@ -141,9 +138,9 @@ def calculate_risk(analysis_result: dict) -> tuple[int, str]:
     return score, level
 
 
-# =============================================================================
-# SECTION 3 — RULE-BASED FALLBACK RESPONSE GENERATOR
-# =============================================================================
+
+# RULE-BASED FALLBACK RESPONSE GENERATOR
+
 
 def _build_fallback_result(analysis_result: dict, reports: list[dict]) -> dict:
     """
@@ -158,11 +155,11 @@ def _build_fallback_result(analysis_result: dict, reports: list[dict]) -> dict:
     connections    = analysis_result.get("connections", [])
     total_reports  = analysis_result.get("metrics", {}).get("total_reports", len(reports))
 
-    # Combine all report text for MITRE mapping
+    # Combining reports for MITRE mapping
     all_text = " ".join(r.get("text", "") for r in reports)
     techniques = map_mitre_techniques(all_text)
 
-    # --- Build evidence facts from actual extracted data ---
+    # evidence building
     evidence_facts = []
     for conn in connections:
         ioc          = conn.get("ioc", "Unknown IOC")
@@ -174,7 +171,7 @@ def _build_fallback_result(analysis_result: dict, reports: list[dict]) -> dict:
             )
 
     if not evidence_facts:
-        # Generic fallback if connections list is empty
+        # fallback if list is empty:
         if shared_iocs:
             ioc = shared_iocs[0]["ioc"]
             reps = shared_iocs[0].get("reports", [])
@@ -189,7 +186,7 @@ def _build_fallback_result(analysis_result: dict, reports: list[dict]) -> dict:
                 f"reports may represent separate incidents."
             )
 
-    # --- Build AI hypotheses from heuristics ---
+    # AI  hypothesis
     hypotheses = []
     if len(shared_iocs) >= 2:
         hypotheses.append(
@@ -207,7 +204,7 @@ def _build_fallback_result(analysis_result: dict, reports: list[dict]) -> dict:
             "Recommend continued monitoring and correlation against threat intelligence feeds."
         )
 
-    # --- Build defensive actions from actual IOCs ---
+    # defensive actions
     defensive_actions = []
     block_items = [i["ioc"] for i in indicators if i["type"] in ("IPv4", "Domain", "URL")]
     if block_items:
@@ -239,7 +236,7 @@ def _build_fallback_result(analysis_result: dict, reports: list[dict]) -> dict:
             "[REVIEW] Escalate reports to Tier-2 analyst for manual triage."
         )
 
-    # --- Executive summary ---
+    
     shared_label = f"{len(shared_iocs)} shared IOC(s)" if shared_iocs else "no shared IOCs"
     exec_summary = (
         f"{level}-risk assessment across {total_reports} correlated report(s) "
@@ -256,12 +253,12 @@ def _build_fallback_result(analysis_result: dict, reports: list[dict]) -> dict:
         "ai_hypotheses":     hypotheses,
         "mitre_techniques":  techniques,
         "defensive_actions": defensive_actions,
-        "_source":           "rule-based-fallback",   # internal flag; hide in UI
+        "_source":           "rule-based-fallback",   
     }
 
 
-# =============================================================================
-# SECTION 4 — LLM ANALYST  (wraps fallback automatically)
+
+##  LLM ANALYST  (wraps fallback automatically)
 # =============================================================================
 
 def _build_llm_prompt(reports: list[dict], analysis_result: dict) -> str:
@@ -420,7 +417,7 @@ def generate_ai_assessment(reports: list[dict], analysis_result: dict) -> dict:
         or ""
     ).strip()
 
-    # ── Skip LLM entirely if no API key ───────────────────────────────────────
+    #Skip LLM entirely if no API key 
     if not api_key:
         print("[ai_engine] No Backboard/DigitalOcean/API key set — using rule-based fallback.")
         result = _build_fallback_result(analysis_result, reports)
@@ -432,7 +429,7 @@ def generate_ai_assessment(reports: list[dict], analysis_result: dict) -> dict:
 
     prompt = _build_llm_prompt(reports, analysis_result)
 
-    # ── 1. Attempt Backboard.io API ───────────────────────────────────────────
+    # Attempt Backboard.io API 
     try:
         start = time.time()
         bb_data = _call_backboard_api(api_key, prompt)
@@ -475,7 +472,7 @@ def generate_ai_assessment(reports: list[dict], analysis_result: dict) -> dict:
     except Exception as bb_err:
         print(f"[ai_engine] Backboard.io call failed ({type(bb_err).__name__}: {bb_err})")
 
-    # ── 2. Attempt OpenAI-compatible / DigitalOcean GenAI endpoint ────────────
+    # Attempt OpenAI-compatible / DigitalOcean GenAI endpoint 
     if _openai_available and not backboard_key:
         try:
             client = OpenAI(api_key=api_key, base_url=LLM_BASE_URL)
@@ -509,7 +506,7 @@ def generate_ai_assessment(reports: list[dict], analysis_result: dict) -> dict:
         except Exception as e:
             print(f"[ai_engine] OpenAI/DO call failed ({type(e).__name__}: {e}) — falling back.")
 
-    # ── 3. Deterministic Rule-Based Fallback ──────────────────────────────────
+    # 3. Deterministic Rule-Based Fallback 
     result = _build_fallback_result(analysis_result, reports)
     result = _attach_risk(result, analysis_result)
     valid_iocs = [item["ioc"] for item in analysis_result.get("indicators", []) if item.get("ioc")]
@@ -526,8 +523,8 @@ def _attach_risk(result: dict, analysis_result: dict) -> dict:
     return result
 
 
-# =============================================================================
-# SECTION 5 — HALLUCINATION GUARDRAIL  (Phase 3 judge-winning feature)
+
+# HALLUCINATION GUARDRAIL  
 # =============================================================================
 
 def validate_ai_output(ai_result: dict, valid_iocs: list[str]) -> dict:
@@ -556,7 +553,7 @@ def validate_ai_output(ai_result: dict, valid_iocs: list[str]) -> dict:
 
     valid_lower = {v.lower() for v in valid_iocs}
 
-    # Collect all text fields from the AI result
+    # Collecting all text fields from the AI result
     text_fields = []
     for key in ("executive_summary", "evidence_facts", "ai_hypotheses", "defensive_actions"):
         val = ai_result.get(key, "")
@@ -595,13 +592,13 @@ def validate_ai_output(ai_result: dict, valid_iocs: list[str]) -> dict:
         }
 
 
-# =============================================================================
-# QUICK LOCAL TEST  —  run: python ai_engine.py
+
+#  LOCAL TEST 
 # =============================================================================
 if __name__ == "__main__":
     from contracts import MOCK_ANALYSIS_RESULT
 
-    # Simulate what Person 1's analyzer.py will pass in
+    
     sample_reports = [
         {"report_id": "REP-01", "text": "Spearphishing email contained link to hxxps://auth-update-portal[.]com. Callback to 185.220.101[.]45 observed."},
         {"report_id": "REP-02", "text": "Brute-force from 185.220.101.45. CVE-2024-21412 exploited on web server."},
@@ -612,25 +609,25 @@ if __name__ == "__main__":
     print("Testing rule-based components (works without an API key)...")
     print("=" * 60)
 
-    # Test risk scorer
+    # risk scorer
     score, level = calculate_risk(MOCK_ANALYSIS_RESULT)
     print(f"\n[RISK SCORE]  {score}/100  →  {level}")
 
-    # Test MITRE mapper
+    # MITRE mapper testing
     all_text = " ".join(r["text"] for r in sample_reports)
     techniques = map_mitre_techniques(all_text)
     print(f"\n[MITRE TECHNIQUES]")
     for t in techniques:
         print(f"  {t['id']}  {t['name']}  ({t['tactic']})")
 
-    # Test full fallback (no LLM)
+    # Test full fallback 
     fallback = _build_fallback_result(MOCK_ANALYSIS_RESULT, sample_reports)
     print(f"\n[FALLBACK RESULT]")
     print(f"  Risk:    {fallback['risk_level']} ({fallback['risk_score']})")
     print(f"  Summary: {fallback['executive_summary']}")
     print(f"  Actions: {fallback['defensive_actions']}")
 
-    # Test hallucination checker
+    # hallucination checker
     valid_iocs = [i["ioc"] for i in MOCK_ANALYSIS_RESULT["indicators"]]
     validation = validate_ai_output(fallback, valid_iocs)
     print(f"\n[HALLUCINATION CHECK]  {validation['badge_text']}")
