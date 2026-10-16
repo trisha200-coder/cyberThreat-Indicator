@@ -1,23 +1,8 @@
-# =============================================================================
-# ai_engine.py  —  Person 2 owns this file
+
 # Hybrid AI + Rule-Based Risk Scorer, MITRE Mapper, LLM Analyst + Fallback
-#
-# HOW TO USE YOUR OWN API KEY
-# ----------------------------
-# Option A  (recommended during hackathon): set an environment variable
-#     Windows PowerShell:  $env:OPENAI_API_KEY = "sk-..."
-#     Linux/Mac terminal:  export OPENAI_API_KEY="sk-..."
-#
-# Option B: Create a file called  .env  in the project root with one line:
-#     OPENAI_API_KEY=sk-...
-#   Then install python-dotenv  (pip install python-dotenv)  and uncomment the
-#   two dotenv lines below.
-#
+
 # The code works with:
-#   • OpenAI  (default, base_url not needed)
-#   • Google Gemini OpenAI-compat endpoint  (change base_url + model below)
-#   • Groq     (change base_url + model below)
-#   • Local Ollama  (change base_url to http://localhost:11434/v1, model to any)
+#   OpenAI,Google Gemini OpenAI-compat endpoint, Groq  ,Local Ollama 
 # =============================================================================
 
 import os
@@ -28,8 +13,8 @@ import urllib.request
 import urllib.error
 
 # Uncomment these two lines if you are using a .env file for the API key:
-# from dotenv import load_dotenv
-# load_dotenv()
+from dotenv import load_dotenv
+load_dotenv()
 
 # ── OpenAI-compatible client ──────────────────────────────────────────────────
 try:
