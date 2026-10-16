@@ -8,9 +8,9 @@ Purpose: Provides a rich, realistic 6-stage APT cyber threat intelligence datase
 
 from typing import List, Dict
 
-# =====================================================================
+
 # 1. BUILT-IN MULTI-STAGE THREAT REPORTS (6 Reports across the Kill Chain)
-# =====================================================================
+
 SAMPLE_REPORTS: List[Dict[str, str]] = [
     {
         "id": "REP-01",
@@ -118,9 +118,9 @@ SAMPLE_REPORTS: List[Dict[str, str]] = [
     },
 ]
 
-# =====================================================================
-# 2. LIVE DEMO REPORT (For pasting into the UI during the 90-sec pitch)
-# =====================================================================
+
+# 2. LIVE DEMO REPORT 
+
 LIVE_DEMO_REPORT: Dict[str, str] = {
     "id": "REP-07",
     "report_id": "REP-07",
@@ -139,9 +139,9 @@ LIVE_DEMO_REPORT: Dict[str, str] = {
 }
 
 
-# =====================================================================
-# 3. HELPER FUNCTIONS (Used by analyzer.py and app.py)
-# =====================================================================
+
+# 3. HELPER FUNCTIONS 
+
 def get_default_reports() -> List[Dict[str, str]]:
     """
     Returns a fresh copy of the 6 built-in threat reports so the frontend
@@ -158,9 +158,9 @@ def get_live_demo_text() -> str:
     return LIVE_DEMO_REPORT["text"]
 
 
-# =====================================================================
-# 4. SELF-TEST BLOCK (Run `python3 sample_data.py` to verify)
-# =====================================================================
+
+# 4. SELF-TEST BLOCK 
+
 if __name__ == "__main__":
     reports = get_default_reports()
     print(f"✅ Successfully loaded {len(reports)} built-in threat reports:")
