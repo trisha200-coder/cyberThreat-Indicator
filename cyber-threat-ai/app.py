@@ -10,6 +10,14 @@ from analyzer import analyze_reports
 
 reports = get_default_reports()
 analysis = analyze_reports(reports)
+harness_info = ai_result.get("harness_validation", {})
+if harness_info:
+    if harness_info.get("passed"):
+        st.success(harness_info.get("badge_text"))
+    else:
+        st.warning(harness_info.get("badge_text"))
+st.caption(f"Powered by: {ai_result.get('model_used', 'Open-Weight LLM + Rule-Based Harness')}")
+
 # Cyber Threat Intelligence Dashboard
 
 
@@ -993,6 +1001,6 @@ st.markdown("""
     <span>Model Status: Gemini 3.8 Multi-Agent Reasoning Enabled</span>
 </div>
 """, unsafe_allow_html=True)
-```
+
 
 
