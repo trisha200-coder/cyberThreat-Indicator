@@ -23,15 +23,18 @@ except Exception as e:
     st.error(f"Module loading error: {e}")
     st.stop()
 
-# 3. HIGH CONTRAST STYLING & CLEAN ALIGNMENT
+# 3. HIGH CONTRAST STYLING & NEON EFFECTS
 st.markdown("""
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
 /* Base Dark Canvas */
 .stApp {
     background-color: #050608 !important;
     background-image: 
-        radial-gradient(circle at 50% 12%, rgba(255, 100, 60, 0.16) 0%, transparent 55%),
-        radial-gradient(circle at 85% 25%, rgba(130, 90, 240, 0.14) 0%, transparent 50%) !important;
+        radial-gradient(circle at 50% 12%, rgba(255, 100, 60, 0.18) 0%, transparent 55%),
+        radial-gradient(circle at 85% 25%, rgba(130, 90, 240, 0.16) 0%, transparent 50%),
+        radial-gradient(circle at 15% 55%, rgba(244, 63, 94, 0.08) 0%, transparent 45%) !important;
     color: #E2E8F0 !important;
 }
 
@@ -50,42 +53,115 @@ p, span, div {
     color: #CBD5E1;
 }
 
-/* Hero Section */
+/* =========================================================================
+   NEON LIGHTING & GLOW EFFECTS
+   ========================================================================= */
+@keyframes neonAccentGlow {
+    0%, 100% {
+        filter: drop-shadow(0 0 15px rgba(255, 107, 74, 0.85)) 
+                drop-shadow(0 0 30px rgba(255, 69, 58, 0.6)) 
+                drop-shadow(0 0 60px rgba(168, 85, 247, 0.4));
+    }
+    50% {
+        filter: drop-shadow(0 0 25px rgba(255, 107, 74, 1)) 
+                drop-shadow(0 0 45px rgba(255, 69, 58, 0.85)) 
+                drop-shadow(0 0 80px rgba(168, 85, 247, 0.6));
+    }
+}
+
 .hero-box {
+    position: relative;
     text-align: center;
-    padding: 2.5rem 1rem 1.5rem 1rem;
-    max-width: 850px;
+    padding: 2.8rem 1rem 1.6rem 1rem;
+    max-width: 900px;
     margin: 0 auto;
 }
 
-.hero-tag {
-    display: inline-block;
-    font-size: 0.8rem;
+/* Ambient Neon Aura behind title */
+.hero-box::before {
+    content: '';
+    position: absolute;
+    top: 40%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 520px;
+    height: 190px;
+    background: radial-gradient(ellipse, rgba(255, 107, 74, 0.28) 0%, rgba(168, 85, 247, 0.16) 45%, transparent 70%);
+    filter: blur(55px);
+    z-index: 0;
+    pointer-events: none;
+    border-radius: 50%;
+}
+
+.neon-sub-badge {
+    position: relative;
+    z-index: 1;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.78rem;
     font-weight: 700;
-    color: #FF7A45;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: #FF8A65;
     background: rgba(255, 122, 69, 0.12);
-    border: 1px solid rgba(255, 122, 69, 0.3);
-    padding: 5px 14px;
+    border: 1px solid rgba(255, 122, 69, 0.35);
+    padding: 6px 18px;
     border-radius: 9999px;
-    margin-bottom: 1rem;
+    margin-bottom: 1.2rem;
+    box-shadow: 0 0 20px rgba(255, 122, 69, 0.25), inset 0 0 10px rgba(255, 122, 69, 0.1);
 }
 
 .hero-main-title {
-    font-size: 3.8rem;
-    font-weight: 800;
-    line-height: 1.1;
-    margin-bottom: 1rem;
+    position: relative;
+    z-index: 1;
+    font-size: 4.3rem;
+    font-weight: 850;
+    line-height: 1.08;
+    margin-bottom: 1.2rem;
+    letter-spacing: -0.035em;
     color: #FFFFFF;
 }
 
+.neon-white {
+    color: #FFFFFF;
+    text-shadow: 
+        0 0 10px rgba(255, 255, 255, 0.85),
+        0 0 25px rgba(255, 255, 255, 0.4),
+        0 0 45px rgba(168, 85, 247, 0.35);
+}
+
+.neon-fire {
+    display: inline-block;
+    color: #FF7A45;
+    background: linear-gradient(135deg, #FFFFFF 0%, #FFE3D6 20%, #FF7A45 50%, #FF3B30 75%, #C084FC 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: neonAccentGlow 3s ease-in-out infinite;
+}
+
 .hero-sub {
-    font-size: 1.05rem;
+    position: relative;
+    z-index: 1;
+    font-size: 1.08rem;
     color: #94A3B8;
-    margin-bottom: 1.5rem;
+    margin-bottom: 1.6rem;
     line-height: 1.6;
+    max-width: 660px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.brand-neon-text {
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    color: #FFFFFF;
+    text-shadow: 0 0 12px rgba(255, 122, 69, 0.65), 0 0 24px rgba(255, 69, 58, 0.35);
 }
 
 .harness-row {
+    position: relative;
+    z-index: 1;
     display: flex;
     justify-content: center;
     align-items: center;
@@ -95,17 +171,18 @@ p, span, div {
 }
 
 .harness-chip {
-    padding: 6px 14px;
+    padding: 6px 16px;
     border-radius: 9999px;
     font-size: 0.82rem;
     font-weight: 600;
     background: rgba(16, 185, 129, 0.12);
     border: 1px solid rgba(16, 185, 129, 0.3);
     color: #34D399;
+    box-shadow: 0 0 15px rgba(16, 185, 129, 0.2);
 }
 
 .model-chip {
-    padding: 6px 14px;
+    padding: 6px 16px;
     border-radius: 9999px;
     font-size: 0.82rem;
     background: rgba(255, 255, 255, 0.05);
@@ -113,7 +190,7 @@ p, span, div {
     color: #94A3B8;
 }
 
-/* Glass Cards */
+/* Glass Panels */
 .cyber-panel {
     background: rgba(18, 21, 32, 0.7);
     border: 1px solid rgba(255, 255, 255, 0.08);
@@ -128,6 +205,7 @@ p, span, div {
     border-radius: 16px;
     padding: 1.3rem 1.4rem;
     border-top: 2px solid #FF7A45;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
 }
 
 .stat-label {
@@ -180,17 +258,34 @@ p, span, div {
 </style>
 """, unsafe_allow_html=True)
 
-# 4. HERO SECTION WITH ALIGNED BADGES
+# 4. TOP NAVBAR WITH NEON LOGO
+st.markdown("""
+<div style="display: flex; justify-content: space-between; align-items: center; background: rgba(18, 20, 29, 0.75); backdrop-filter: blur(20px); border: 1px solid rgba(255, 255, 255, 0.09); border-radius: 9999px; padding: 12px 26px; margin-bottom: 1.5rem; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
+    <div style="display: flex; align-items: center; gap: 10px;">
+        <div style="width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, #ff7a45, #ff3b30); display: flex; align-items: center; justify-content: center; box-shadow: 0 0 15px rgba(255, 98, 57, 0.6);">🛡️</div>
+        <span class="brand-neon-text">SECURIFY <span style="color:#64748B; font-weight:400;">// AI CTI</span></span>
+    </div>
+    <div style="display: inline-flex; align-items: center; gap: 8px; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.3); color: #34D399; padding: 6px 16px; border-radius: 9999px; font-size: 0.8rem; font-weight: 600; box-shadow: 0 0 12px rgba(16, 185, 129, 0.25);">
+        <span style="width: 7px; height: 7px; background-color: #10B981; border-radius: 50%; box-shadow: 0 0 8px #10B981;"></span>
+        LIVE TELEMETRY STREAM
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
+# 5. HERO SECTION WITH NEON LIGHTS & GLOW
 harness_info = ai_result.get("harness_validation", {})
 harness_text = harness_info.get("badge_text", "Evaluation Harness: Passed") if harness_info else "Harness: Passed"
 model_name = ai_result.get("model_used", "Open-Weight LLM + Rule-Based Harness")
 
 st.markdown(f"""
 <div class="hero-box">
-    <div class="hero-tag">AI THREAT CORRELATION PLATFORM</div>
-    <div class="hero-main-title">protect your intelligence</div>
+    <div class="neon-sub-badge">⚡ AI THREAT CORRELATION & ATTACK GRAPH</div>
+    <div class="hero-main-title">
+        <span class="neon-white">protect your</span> <span class="neon-fire">intelligence</span>
+    </div>
     <div class="hero-sub">
-        Automated multi-source telemetry correlation, indicator extraction, and campaign reconstruction.
+        Continuously ingest fragmented SOC telemetry, detect multi-stage campaign pivots, 
+        and neutralize stealth adversaries with automated indicator correlation.
     </div>
     <div class="harness-row">
         <div class="harness-chip">✓ {harness_text}</div>
@@ -199,7 +294,7 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# 5. METRICS COMPUTATION & CARDS
+# 6. METRICS COMPUTATION & CARDS
 metrics = analysis_result.get("metrics", {})
 total_reports = metrics.get("total_reports", len(reports))
 total_iocs = metrics.get("total_iocs", 0)
@@ -243,7 +338,7 @@ with c4:
 
 st.markdown("<div style='height: 1.5rem;'></div>", unsafe_allow_html=True)
 
-# 6. TABS
+# 7. TABS
 overview, assessment, raw = st.tabs([
     "📊 Threat Analysis",
     "🤖 AI Risk Assessment",
@@ -261,7 +356,7 @@ with overview:
                 <div class="cyber-panel">
                     <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
                         <strong style="color: #FF7A45;">[{rep.get('id', 'REP')}] {rep.get('title', 'Untitled')}</strong>
-                        <span style="font-size: 0.8rem; color: #64748B;">{rep.get('date', '')}</span>
+                        <span style="font-size: 0.8rem; color: #64748B;">📅 {rep.get('date', '')}</span>
                     </div>
                     <div style="font-size: 0.82rem; color: #38BDF8; margin-bottom: 0.5rem;">
                         Source: {rep.get('source', '')}
@@ -308,10 +403,10 @@ with assessment:
     risk_level = str(ai_result.get("risk_level", "Unknown")).upper()
     
     st.markdown(f"""
-    <div class="cyber-panel" style="background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35);">
+    <div class="cyber-panel" style="background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); box-shadow: 0 0 25px rgba(239, 68, 68, 0.15);">
         <div style="display: flex; justify-content: space-between; align-items: center;">
             <div>
-                <span style="background: #EF4444; color: #FFF; font-weight: 800; font-size: 0.8rem; padding: 4px 12px; border-radius: 9999px;">
+                <span style="background: #EF4444; color: #FFF; font-weight: 800; font-size: 0.8rem; padding: 4px 12px; border-radius: 9999px; box-shadow: 0 0 15px rgba(239, 68, 68, 0.6);">
                     RISK LEVEL: {risk_level}
                 </span>
                 <h3 style="color: #FFFFFF; margin: 0.6rem 0 0.2rem 0;">AI Threat Synthesis</h3>
